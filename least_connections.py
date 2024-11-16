@@ -71,3 +71,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# sudo mn --topo=tree,depth=2,fanout=2 --controller=remote,ip=127.0.0.1 --switch=ovs,protocols=OpenFlow13
+# python3 least_connections.py
