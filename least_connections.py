@@ -4,6 +4,16 @@ import time
 # URL của Floodlight REST API
 BASE_URL = "http://127.0.0.1:8080"
 
+# Hàm lấy danh sách các switch từ Floodlight
+def get_switches():
+    url = f"{BASE_URL}/wm/core/switch/all/json"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return [switch['switchDPID'] for switch in response.json()]
+    else:
+        print("Error fetching switches:", response.status_code)
+        return []
+
 # Hàm lấy danh sách các luồng từ switch
 def get_flows():
     url = f"{BASE_URL}/wm/core/switch/all/flow/json"
@@ -22,12 +32,15 @@ def get_least_connection_server(servers):
     for switch_id, flow_data in flows.items():
         for flow in flow_data['flows']:
             if 'instructions' in flow:
-                for instruction in flow['instructions']:
-                    if instruction['type'] == 'OUTPUT':
-                        out_port = instruction['port']
-                        for server in servers:
-                            if out_port == servers[server]:
-                                server_connections[server] += 1
+                for instructions in flow['instructions']:
+                    if isinstance(instructions, dict) and 'instruction_apply_actions' in instructions:
+                        actions = instructions['instruction_apply_actions']['actions']
+                        for action in actions.split(','):
+                            if action.startswith("output="):
+                                out_port = action.split('=')[1]
+                                for server, server_port in servers.items():
+                                    if str(server_port) == out_port:
+                                        server_connections[server] += 1
 
     # Chọn server có ít kết nối nhất
     return min(server_connections, key=server_connections.get)
@@ -45,14 +58,17 @@ def install_rule(switch_id, in_port, out_port):
     }
     response = requests.post(url, json=data)
     if response.status_code == 200:
-        print(f"Installed rule: {data}")
+        print(f"Installed rule on {switch_id}: {data}")
     else:
         print("Error installing rule:", response.status_code, response.text)
 
 # Danh sách server (địa chỉ IP: Cổng switch)
 servers = {
     "10.0.0.1": 2,
-    "10.0.0.2": 3
+    "10.0.0.2": 3,
+    "10.0.0.3": 4,
+    "10.0.0.4": 5,
+    "10.0.0.5": 6
 }
 
 # Main loop
@@ -62,8 +78,12 @@ def main():
         selected_server = get_least_connection_server(servers)
         print("Selected server:", selected_server)
 
-        # Cài đặt flow rule
-        for switch_id in ["00:00:00:00:00:00:00:01"]:  # ID của switch
+        # Lấy danh sách các switch từ Floodlight
+        switches = get_switches()
+
+        # Cài đặt flow rule cho mỗi switch
+        for switch_id in switches:
+            print(f"Installing rule on switch: {switch_id}")
             install_rule(switch_id, in_port=1, out_port=servers[selected_server])
 
         # Chờ trước khi kiểm tra lại
@@ -71,6 +91,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# sudo mn --topo=tree,depth=2,fanout=2 --controller=remote,ip=127.0.0.1 --switch=ovs,protocols=OpenFlow13
-# python3 least_connections.py
