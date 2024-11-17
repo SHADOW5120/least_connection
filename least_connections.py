@@ -4,16 +4,6 @@ import time
 # URL của Floodlight REST API
 BASE_URL = "http://127.0.0.1:8080"
 
-# Hàm lấy danh sách các switch từ Floodlight
-def get_switches():
-    url = f"{BASE_URL}/wm/core/switch/all/json"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return [switch['switchDPID'] for switch in response.json()]
-    else:
-        print("Error fetching switches:", response.status_code)
-        return []
-
 # Hàm lấy danh sách các luồng từ switch
 def get_flows():
     url = f"{BASE_URL}/wm/core/switch/all/flow/json"
@@ -79,10 +69,10 @@ def main():
         print("Selected server:", selected_server)
 
         # Lấy danh sách các switch từ Floodlight
-        switches = get_switches()
+        flows = get_flows()
 
         # Cài đặt flow rule cho mỗi switch
-        for switch_id in switches:
+        for switch_id in flows.keys():
             print(f"Installing rule on switch: {switch_id}")
             install_rule(switch_id, in_port=1, out_port=servers[selected_server])
 
