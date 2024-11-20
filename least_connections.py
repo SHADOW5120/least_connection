@@ -1,83 +1,62 @@
 import requests
+import json
 import time
 
-# URL của Floodlight REST API
-BASE_URL = "http://127.0.0.1:8080"
+# Địa chỉ API của Floodlight
+floodlight_url = "http://127.0.0.1:8080/stats/flow"
+floodlight_add_url = "http://127.0.0.1:8080/wm/staticflowentrypusher/addentry/json"
 
-# Hàm lấy danh sách các luồng từ switch
-def get_flows():
-    url = f"{BASE_URL}/wm/core/switch/all/flow/json"
-    response = requests.get(url)
+def get_switch_stats():
+    """Lấy thông tin về kết nối từ các switch"""
+    response = requests.get(floodlight_url)
     if response.status_code == 200:
         return response.json()
     else:
-        print("Error fetching flows:", response.status_code)
-        return {}
+        print("Không thể lấy thông tin từ Floodlight.")
+        return None
 
-# Hàm tính số kết nối hiện tại trên mỗi server
-def get_least_connection_server(servers):
-    server_connections = {server: 0 for server in servers}
-    flows = get_flows()
+def least_connection_switch(stats):
+    """Chọn switch có ít kết nối nhất"""
+    min_connections = float('inf')
+    chosen_switch = None
+    for switch, flows in stats.items():
+        active_connections = sum(flow['packetCount'] for flow in flows.values())
+        if active_connections < min_connections:
+            min_connections = active_connections
+            chosen_switch = switch
+    return chosen_switch
 
-    for switch_id, flow_data in flows.items():
-        for flow in flow_data['flows']:
-            if 'instructions' in flow:
-                for instructions in flow['instructions']:
-                    if isinstance(instructions, dict) and 'instruction_apply_actions' in instructions:
-                        actions = instructions['instruction_apply_actions']['actions']
-                        for action in actions.split(','):
-                            if action.startswith("output="):
-                                out_port = action.split('=')[1]
-                                for server, server_port in servers.items():
-                                    if str(server_port) == out_port:
-                                        server_connections[server] += 1
-
-    # Chọn server có ít kết nối nhất
-    return min(server_connections, key=server_connections.get)
-
-# Hàm cài đặt rule cho switch
-def install_rule(switch_id, in_port, out_port):
-    url = f"{BASE_URL}/wm/staticflowpusher/json"
-    data = {
-        "switch": switch_id,
-        "name": f"flow-{in_port}-{out_port}",
-        "priority": 100,
-        "in_port": str(in_port),
-        "active": "true",
-        "actions": f"output={out_port}"
+def add_flow_rule(switch, in_port, out_port, priority=100):
+    """Thêm flow rule vào switch trong Floodlight"""
+    flow_entry = {
+        "switch": switch,  # Switch mà bạn muốn thêm flow rule
+        "name": f"flow_rule_{switch}",
+        "cookie": "0",
+        "priority": priority,
+        "in_port": in_port,
+        "actions": f"output={out_port}"  # Đưa lưu lượng đến cổng output
     }
-    response = requests.post(url, json=data)
+    
+    response = requests.post(floodlight_add_url, data=json.dumps(flow_entry), headers={'Content-Type': 'application/json'})
     if response.status_code == 200:
-        print(f"Installed rule on {switch_id}: {data}")
+        print(f"Flow rule đã được thêm vào switch {switch}.")
     else:
-        print("Error installing rule:", response.status_code, response.text)
+        print(f"Không thể thêm flow rule vào switch {switch}.")
 
-# Danh sách server (địa chỉ IP: Cổng switch)
-servers = {
-    "10.0.0.1": 2,
-    "10.0.0.2": 3,
-    "10.0.0.3": 4,
-    "10.0.0.4": 5,
-    "10.0.0.5": 6
-}
-
-# Main loop
-def main():
+def load_balancing():
+    """Thuật toán cân bằng tải với Least Connection"""
     while True:
-        # Lấy server ít kết nối nhất
-        selected_server = get_least_connection_server(servers)
-        print("Selected server:", selected_server)
+        stats = get_switch_stats()  # Lấy thông tin từ Floodlight
+        if stats:
+            # Xác định switch có ít kết nối nhất
+            switch = least_connection_switch(stats)
+            print(f"Switch có ít kết nối nhất là: {switch}")
 
-        # Lấy danh sách các switch từ Floodlight
-        flows = get_flows()
+            # Cập nhật flow rule để phân phối lưu lượng tới switch ít kết nối
+            # Giả sử chúng ta đang thay đổi flow cho switch và chọn cổng đầu vào và cổng đầu ra.
+            add_flow_rule(switch, in_port=1, out_port=2)  # Ví dụ cổng in_port=1, out_port=2
 
-        # Cài đặt flow rule cho mỗi switch
-        for switch_id in flows.keys():
-            print(f"Installing rule on switch: {switch_id}")
-            install_rule(switch_id, in_port=1, out_port=servers[selected_server])
-
-        # Chờ trước khi kiểm tra lại
-        time.sleep(10)
+        time.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    load_balancing()
